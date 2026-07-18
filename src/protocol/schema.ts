@@ -1,4 +1,4 @@
-import type { AppProfile, FieldSchema, FieldType, MessageSchema } from '../domain/types'
+import type { AppProfile, FieldSchema, FieldType, MessageSchema, NumericFieldType } from '../domain/types'
 
 const FIXED_SIZES: Partial<Record<FieldType, number>> = {
   bool: 1,
@@ -12,11 +12,20 @@ const FIXED_SIZES: Partial<Record<FieldType, number>> = {
   f64: 8,
 }
 
+export const NUMERIC_FIELD_TYPES: NumericFieldType[] = ['u8', 'i8', 'u16', 'i16', 'u32', 'i32', 'f32', 'f64']
+export const isNumericField = (field: FieldSchema): field is FieldSchema & { type: NumericFieldType } =>
+  NUMERIC_FIELD_TYPES.includes(field.type as NumericFieldType)
+
+export const isIntegerField = (field: FieldSchema) =>
+  ['u8', 'i8', 'u16', 'i16', 'u32', 'i32'].includes(field.type)
+
+export const isFloatField = (field: FieldSchema) => ['f32', 'f64'].includes(field.type)
+
 export const fieldByteSize = (field: FieldSchema): number => {
   const fixed = FIXED_SIZES[field.type]
   if (fixed) return fixed
   if (!Number.isInteger(field.length) || (field.length ?? 0) <= 0) {
-    throw new Error(`${field.label || field.key} 需要正整数固定长度`)
+    throw new Error(`${field.label || field.key} needs a positive fixed length`)
   }
   return field.length as number
 }
@@ -37,14 +46,19 @@ export const validateMessageSchema = (schema: MessageSchema): string[] => {
   const errors: string[] = []
   const min = schema.direction === 'rx' ? 0x01 : 0x80
   const max = schema.direction === 'rx' ? 0x7f : 0xef
+  if (!schema.uid?.trim()) errors.push(`${schema.name || 'message'} is missing an internal uid`)
   if (!Number.isInteger(schema.id) || schema.id < min || schema.id > max) {
-    errors.push(`${schema.name || '消息'} ID必须位于0x${min.toString(16)}~0x${max.toString(16)}`)
+    errors.push(`${schema.name || 'message'} ID must be 0x${min.toString(16)}-0x${max.toString(16)}`)
   }
-  if (!schema.name.trim()) errors.push('消息名称不能为空')
+  if (!schema.name.trim()) errors.push('Message name is required')
   const keys = new Set<string>()
+  const fieldIds = new Set<string>()
   schema.fields.forEach((item, index) => {
-    if (!KEY_PATTERN.test(item.key)) errors.push(`字段${index + 1}键名不合法`)
-    if (keys.has(item.key)) errors.push(`字段键名重复：${item.key}`)
+    if (!item.id?.trim()) errors.push(`Field ${index + 1} is missing an internal id`)
+    if (fieldIds.has(item.id)) errors.push(`Field id is duplicated: ${item.id}`)
+    fieldIds.add(item.id)
+    if (!KEY_PATTERN.test(item.key)) errors.push(`Field ${index + 1} key is invalid`)
+    if (keys.has(item.key)) errors.push(`Field key is duplicated: ${item.key}`)
     keys.add(item.key)
     try {
       fieldByteSize(item)
@@ -53,7 +67,7 @@ export const validateMessageSchema = (schema: MessageSchema): string[] => {
     }
   })
   try {
-    if (payloadByteSize(schema) > 512) errors.push('Payload不能超过512字节')
+    if (payloadByteSize(schema) > 512) errors.push('Payload cannot exceed 512 bytes')
   } catch {
     // Field-specific error already included.
   }
@@ -62,14 +76,22 @@ export const validateMessageSchema = (schema: MessageSchema): string[] => {
 
 export const validateProfile = (profile: AppProfile): string[] => {
   const errors: string[] = []
-  if (profile.version !== 1) errors.push('配置版本必须为1')
-  if (!profile.name?.trim()) errors.push('配置名称不能为空')
-  const ids = new Set<string>()
+  if (profile.version !== 2) errors.push('Profile version must be 2')
+  if (!profile.name?.trim()) errors.push('Profile name is required')
+  if (!Number.isFinite(profile.serial.baudRate) || profile.serial.baudRate < 300) errors.push('Baud rate must be at least 300')
+  if (!Number.isInteger(profile.history.maxFrames) || profile.history.maxFrames < 100 || profile.history.maxFrames > 50000) errors.push('Frame history must be 100-50000')
+  if (!Number.isInteger(profile.history.maxLogs) || profile.history.maxLogs < 100 || profile.history.maxLogs > 20000) errors.push('Log history must be 100-20000')
+  if (!Number.isFinite(profile.chart.timeWindowSeconds) || profile.chart.timeWindowSeconds < 1 || profile.chart.timeWindowSeconds > 3600) errors.push('Chart window must be 1-3600 seconds')
+
+  const identities = new Set<string>()
+  const uids = new Set<string>()
   for (const schema of [...profile.rxSchemas, ...profile.txSchemas]) {
     errors.push(...validateMessageSchema(schema))
     const identity = `${schema.direction}:${schema.id}`
-    if (ids.has(identity)) errors.push(`消息ID重复：${identity}`)
-    ids.add(identity)
+    if (identities.has(identity)) errors.push(`Message ID is duplicated: ${identity}`)
+    identities.add(identity)
+    if (uids.has(schema.uid)) errors.push(`Message uid is duplicated: ${schema.uid}`)
+    uids.add(schema.uid)
   }
   return errors
 }

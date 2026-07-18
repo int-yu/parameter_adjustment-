@@ -27,13 +27,13 @@ export class SerialTransport {
   }
 
   async connect(settings: SerialSettings) {
-    if (!navigator.serial) throw new Error('当前浏览器不支持Web Serial')
-    if (this.connected) throw new Error('串口已经连接')
+    if (!navigator.serial) throw new Error('This browser does not support Web Serial')
+    if (this.connected) throw new Error('Serial port is already connected')
     const port = await navigator.serial.requestPort()
     await port.open(settings)
     if (!port.readable || !port.writable) {
       await port.close()
-      throw new Error('串口没有可用的读写流')
+      throw new Error('Serial port does not expose readable/writable streams')
     }
     this.port = port
     this.writer = port.writable.getWriter()
@@ -76,13 +76,13 @@ export class SerialTransport {
   }
 
   sendLatest(key: string, bytes: Uint8Array) {
-    if (!this.writer) throw new Error('串口未连接')
+    if (!this.writer) throw new Error('Serial port is not connected')
     this.pendingLatest.set(key, bytes)
     void this.pumpWrites()
   }
 
   send(bytes: Uint8Array) {
-    if (!this.writer) throw new Error('串口未连接')
+    if (!this.writer) throw new Error('Serial port is not connected')
     this.manualQueue.push(bytes)
     void this.pumpWrites()
   }

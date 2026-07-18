@@ -6,7 +6,7 @@ const waitFor = async (condition: () => boolean) => {
     if (condition()) return
     await new Promise((resolve) => setTimeout(resolve, 0))
   }
-  throw new Error('等待串口写入超时')
+  throw new Error('Timed out waiting for serial write')
 }
 
 const createSerial = () => {
@@ -22,7 +22,7 @@ const createSerial = () => {
 describe('SerialTransport', () => {
   afterEach(() => vi.unstubAllGlobals())
 
-  it('串口忙时同一消息只保留最新待发状态', async () => {
+  it('keeps only the latest pending frame for the same message while busy', async () => {
     const writes: number[][] = []
     let releaseFirst!: () => void
     const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve })
@@ -42,9 +42,9 @@ describe('SerialTransport', () => {
     const transport = new SerialTransport({ onBytes: vi.fn(), onError: vi.fn(), onDisconnect: vi.fn(), onTx: vi.fn() })
 
     await transport.connect({ baudRate: 115200, dataBits: 8, stopBits: 1, parity: 'none', flowControl: 'none' })
-    transport.sendLatest('pid', new Uint8Array([1]))
-    transport.sendLatest('pid', new Uint8Array([2]))
-    transport.sendLatest('pid', new Uint8Array([3]))
+    transport.sendLatest('message-a', new Uint8Array([1]))
+    transport.sendLatest('message-a', new Uint8Array([2]))
+    transport.sendLatest('message-a', new Uint8Array([3]))
     releaseFirst()
     await waitFor(() => writes.length === 2)
 
@@ -52,7 +52,7 @@ describe('SerialTransport', () => {
     await transport.disconnect()
   })
 
-  it('物理断线释放端口且不补发旧状态', async () => {
+  it('releases the port on physical disconnect and does not replay old state', async () => {
     const serial = createSerial()
     const close = vi.fn()
     const port = {
@@ -72,6 +72,6 @@ describe('SerialTransport', () => {
 
     expect(transport.connected).toBe(false)
     expect(close).toHaveBeenCalledOnce()
-    expect(() => transport.sendLatest('pid', new Uint8Array([9]))).toThrow('串口未连接')
+    expect(() => transport.sendLatest('message-a', new Uint8Array([9]))).toThrow('Serial port is not connected')
   })
 })

@@ -4,6 +4,7 @@ import { decodePayload, encodeFrame, encodePayload } from './codec'
 import { payloadByteSize, validateMessageSchema } from './schema'
 
 const schema: MessageSchema = {
+  uid: 'tx-all-types',
   id: 0x81,
   name: 'ALL_TYPES',
   direction: 'tx',
@@ -34,7 +35,7 @@ describe('payload codec', () => {
       i32: -123_456_789,
       f32: 1.25,
       f64: Math.PI,
-      text: '测A试',
+      text: 'TEST',
       bytes: 'DE AD BE EF',
     }
     const payload = encodePayload(schema, values)
@@ -49,7 +50,7 @@ describe('payload codec', () => {
     expect(decoded.i32).toBe(-123_456_789)
     expect(decoded.f32).toBeCloseTo(1.25)
     expect(decoded.f64).toBeCloseTo(Math.PI)
-    expect(decoded.text).toBe('测A')
+    expect(decoded.text).toBe('TEST')
     expect(Array.from(decoded.bytes as Uint8Array)).toEqual([0xde, 0xad, 0xbe, 0xef])
   })
 
@@ -63,7 +64,7 @@ describe('payload codec', () => {
   })
 
   it('rejects invalid IDs, duplicate keys and oversized fields', () => {
-    const invalid: MessageSchema = { id: 0x01, name: '', direction: 'tx', fields: [
+    const invalid: MessageSchema = { uid: 'bad', id: 0x01, name: '', direction: 'tx', fields: [
       { id: '1', key: 'bad-key', label: 'A', type: 'fixed-bytes', length: 513 },
       { id: '2', key: 'bad-key', label: 'B', type: 'u8' },
     ] }

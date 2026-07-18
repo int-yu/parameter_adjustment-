@@ -5,7 +5,7 @@ import 'uplot/dist/uPlot.min.css'
 export interface PlotSeries {
   label: string
   color: string
-  values: number[]
+  values: Array<number | null>
   scale?: string
 }
 
@@ -53,7 +53,7 @@ export function Plot({ title, x, series, height = 260 }: PlotProps) {
             points: { show: false },
           })),
         ],
-      }, [x, ...series.map((item) => item.values)], host)
+      }, [x, ...series.map((item) => item.values)] as uPlot.AlignedData, host)
     }
     build()
     const observer = new ResizeObserver(build)

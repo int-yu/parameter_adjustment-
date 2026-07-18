@@ -1,7 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { PID_TELEMETRY_SCHEMA } from '../domain/defaultProfile'
+import type { MessageSchema } from '../domain/types'
 import { encodeFrame } from './codec'
 import { FrameStreamParser } from './parser'
+
+const telemetrySchema: MessageSchema = {
+  uid: 'rx-telemetry',
+  id: 0x01,
+  name: 'TELEMETRY',
+  direction: 'rx',
+  fields: [
+    { id: 'time', key: 'time_ms', label: 'Time', type: 'u32' },
+    { id: 'run', key: 'run', label: 'Run', type: 'bool' },
+    { id: 'mode', key: 'mode', label: 'Mode', type: 'u8' },
+    { id: 'left', key: 'left_encoder', label: 'Left encoder', type: 'i32' },
+    { id: 'right', key: 'right_encoder', label: 'Right encoder', type: 'i32' },
+    { id: 'target', key: 'target', label: 'Target', type: 'f32' },
+    { id: 'output', key: 'output', label: 'Output', type: 'f32' },
+  ],
+}
 
 const values = {
   time_ms: 1234,
@@ -9,35 +25,30 @@ const values = {
   mode: 1,
   left_encoder: -100,
   right_encoder: 120,
-  left_target_cps: 300,
-  right_target_cps: 310,
-  left_output: 12.5,
-  right_output: 13.5,
-  yaw_target_deg: 0,
-  yaw_deg: -2.5,
-  heading_output: 4.25,
+  target: 300,
+  output: 12.5,
 }
 
-const resolver = (id: number) => id === PID_TELEMETRY_SCHEMA.id ? PID_TELEMETRY_SCHEMA : undefined
+const resolver = (id: number) => id === telemetrySchema.id ? telemetrySchema : undefined
 
 describe('FrameStreamParser', () => {
   it('parses a frame supplied one byte at a time', () => {
     const parser = new FrameStreamParser()
-    const frame = encodeFrame(PID_TELEMETRY_SCHEMA, values, 42)
+    const frame = encodeFrame(telemetrySchema, values, 42)
     const frames = []
     for (const byte of frame) frames.push(...parser.push(new Uint8Array([byte]), resolver).frames)
     expect(frames).toHaveLength(1)
     expect(frames[0].sequence).toBe(42)
-    expect(frames[0].payloadLength).toBe(42)
-    expect(frames[0].values?.yaw_deg).toBeCloseTo(-2.5)
+    expect(frames[0].payloadLength).toBe(22)
+    expect(frames[0].values?.output).toBeCloseTo(12.5)
   })
 
   it('recovers from noise, a corrupted frame and glued valid frames', () => {
     const parser = new FrameStreamParser()
-    const goodA = encodeFrame(PID_TELEMETRY_SCHEMA, values, 1)
-    const bad = encodeFrame(PID_TELEMETRY_SCHEMA, values, 2)
+    const goodA = encodeFrame(telemetrySchema, values, 1)
+    const bad = encodeFrame(telemetrySchema, values, 2)
     bad[12] ^= 0xff
-    const goodB = encodeFrame(PID_TELEMETRY_SCHEMA, values, 3)
+    const goodB = encodeFrame(telemetrySchema, values, 3)
     const input = new Uint8Array(3 + goodA.length + bad.length + goodB.length)
     input.set([0x12, 0x34, 0x56])
     input.set(goodA, 3)
@@ -50,7 +61,7 @@ describe('FrameStreamParser', () => {
   })
 
   it('keeps a valid unknown message as raw payload', () => {
-    const unknownSchema = { ...PID_TELEMETRY_SCHEMA, id: 0x03 }
+    const unknownSchema = { ...telemetrySchema, id: 0x03 }
     const parser = new FrameStreamParser()
     const result = parser.push(encodeFrame(unknownSchema, values, 5), () => undefined)
     expect(result.frames).toHaveLength(1)
@@ -60,7 +71,7 @@ describe('FrameStreamParser', () => {
 
   it('clears partial data on reset', () => {
     const parser = new FrameStreamParser()
-    const frame = encodeFrame(PID_TELEMETRY_SCHEMA, values, 7)
+    const frame = encodeFrame(telemetrySchema, values, 7)
     parser.push(frame.slice(0, 10), resolver)
     parser.reset()
     expect(parser.push(frame.slice(10), resolver).frames).toHaveLength(0)
@@ -69,10 +80,10 @@ describe('FrameStreamParser', () => {
 
   it('recovers from a bad tail and an oversized length header', () => {
     const parser = new FrameStreamParser()
-    const badTail = encodeFrame(PID_TELEMETRY_SCHEMA, values, 8)
+    const badTail = encodeFrame(telemetrySchema, values, 8)
     badTail[badTail.length - 1] = 0
     const oversized = new Uint8Array([0xaa, 0x55, 1, 1, 0, 0, 1, 2])
-    const good = encodeFrame(PID_TELEMETRY_SCHEMA, values, 9)
+    const good = encodeFrame(telemetrySchema, values, 9)
     const input = new Uint8Array(badTail.length + oversized.length + good.length)
     input.set(badTail)
     input.set(oversized, badTail.length)
@@ -86,7 +97,7 @@ describe('FrameStreamParser', () => {
 
   it('parses glued frames split into irregular chunks', () => {
     const parser = new FrameStreamParser()
-    const frames = [10, 11, 12].map((sequence) => encodeFrame(PID_TELEMETRY_SCHEMA, values, sequence))
+    const frames = [10, 11, 12].map((sequence) => encodeFrame(telemetrySchema, values, sequence))
     const glued = new Uint8Array(frames.reduce((sum, frame) => sum + frame.length, 0))
     let offset = 0
     frames.forEach((frame) => { glued.set(frame, offset); offset += frame.length })

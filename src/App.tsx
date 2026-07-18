@@ -1,48 +1,38 @@
-import { Activity, Settings, SlidersHorizontal, TerminalSquare } from 'lucide-react'
+import { BarChart3, Cable, Settings, SlidersHorizontal, TerminalSquare } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
 import type { AppProfile, DecodedFrame, FieldValue, MessageSchema, RawLogEntry, SerialStats } from './domain/types'
+import { buildTxValues } from './domain/bindings'
 import { loadProfile, saveProfile } from './state/persistence'
-import { validateProfile, defaultValueForField } from './protocol/schema'
+import { validateProfile } from './protocol/schema'
 import { FrameStreamParser } from './protocol/parser'
 import { encodeFrame } from './protocol/codec'
 import { SerialTransport } from './serial/SerialTransport'
 import { SerialToolbar } from './components/SerialToolbar'
-import { PidTab } from './features/PidTab'
 import { ProtocolTab } from './features/ProtocolTab'
-import { ConfigTab } from './features/ConfigTab'
-import { CustomTab } from './features/CustomTab'
-
-const MAX_FRAMES = 5000
-const MAX_LOGS = 1000
+import { DisplayTerminalTab } from './features/DisplayTerminalTab'
+import { ProfessionalDebugTab } from './features/ProfessionalDebugTab'
+import { PacketConfigTab } from './features/PacketConfigTab'
+import { SettingsTab } from './features/SettingsTab'
 
 const emptyStats = (): SerialStats => ({ rxBytes: 0, txBytes: 0, validFrames: 0, invalidFrames: 0, droppedFrames: 0 })
 
-const buildTxValues = (
-  schemas: MessageSchema[],
-  existing: Record<number, Record<string, FieldValue>> = {},
-) => Object.fromEntries(schemas.map((schema) => [
-  schema.id,
-  Object.fromEntries(schema.fields.map((field) => [field.key, existing[schema.id]?.[field.key] ?? defaultValueForField(field)])),
-]))
-
 function App() {
   const [profile, setProfile] = useState<AppProfile>(loadProfile)
-  const [activeTab, setActiveTab] = useState('pid')
+  const [activeTab, setActiveTab] = useState('terminal')
   const [frames, setFrames] = useState<DecodedFrame[]>([])
   const [logs, setLogs] = useState<RawLogEntry[]>([])
   const [stats, setStats] = useState<SerialStats>(emptyStats)
   const [connected, setConnected] = useState(false)
   const [connecting, setConnecting] = useState(false)
   const [paused, setPaused] = useState(false)
-  const [status, setStatus] = useState('未连接。请选择无线DAPLink对应的COM口。')
-  const [txValues, setTxValues] = useState<Record<number, Record<string, FieldValue>>>(() => buildTxValues(profile.txSchemas))
+  const [status, setStatus] = useState('未连接。请在设置页确认串口参数后选择 DAPLink 虚拟串口。')
+  const [txValues, setTxValues] = useState<Record<string, Record<string, FieldValue>>>(() => buildTxValues(profile.txSchemas))
 
   const profileRef = useRef(profile)
-  const pausedRef = useRef(paused)
   const txValuesRef = useRef(txValues)
   const parserRef = useRef(new FrameStreamParser())
-  const sequenceRef = useRef(new Map<number, number>())
+  const sequenceRef = useRef(new Map<string, number>())
   const lastRxSequenceRef = useRef(new Map<number, number>())
   const statsRef = useRef(stats)
   const pendingFramesRef = useRef<DecodedFrame[]>([])
@@ -54,13 +44,16 @@ function App() {
   const onErrorRef = useRef<(error: Error) => void>(() => undefined)
   const onDisconnectRef = useRef<() => void>(() => undefined)
   const transportRef = useRef<SerialTransport | null>(null)
+  const latestTimersRef = useRef(new Map<string, number>())
+  const latestPayloadsRef = useRef(new Map<string, { schema: MessageSchema; values: Record<string, FieldValue> }>())
 
   const flushPending = () => {
     flushTimerRef.current = null
     const pendingFrames = pendingFramesRef.current.splice(0)
     const pendingLogs = pendingLogsRef.current.splice(0)
-    if (pendingFrames.length) setFrames((current) => [...current, ...pendingFrames].slice(-MAX_FRAMES))
-    if (pendingLogs.length) setLogs((current) => [...current, ...pendingLogs].slice(-MAX_LOGS))
+    const current = profileRef.current
+    if (pendingFrames.length) setFrames((items) => [...items, ...pendingFrames].slice(-current.history.maxFrames))
+    if (pendingLogs.length) setLogs((items) => [...items, ...pendingLogs].slice(-current.history.maxLogs))
     setStats({ ...statsRef.current })
   }
 
@@ -69,7 +62,6 @@ function App() {
   }
 
   const queueLog = (entry: Omit<RawLogEntry, 'id'>) => {
-    if (pausedRef.current) return
     pendingLogsRef.current.push({ ...entry, id: logIdRef.current++ })
     scheduleFlush()
   }
@@ -90,7 +82,7 @@ function App() {
           if (gap > 0 && gap < 0x8000) statsRef.current.droppedFrames += gap
         }
         lastRxSequenceRef.current.set(frame.messageId, frame.sequence)
-        if (!pausedRef.current) pendingFramesRef.current.push(frame)
+        pendingFramesRef.current.push(frame)
       }
       scheduleFlush()
     }
@@ -104,11 +96,12 @@ function App() {
       setConnected(false)
       setConnecting(false)
       parserRef.current.reset()
-      setStatus('DAPLink连接已断开；不会补发断线期间的控件值。')
+      setStatus('DAPLink 连接已断开；不会补发断线期间的控件值。')
     }
   })
 
   useEffect(() => {
+    const latestTimers = latestTimersRef.current
     const transport = new SerialTransport({
       onBytes: (bytes) => onBytesRef.current(bytes),
       onTx: (bytes) => onTxRef.current(bytes),
@@ -118,6 +111,7 @@ function App() {
     transportRef.current = transport
     return () => {
       if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current)
+      for (const timer of latestTimers.values()) window.clearTimeout(timer)
       void transport.disconnect()
       transportRef.current = null
     }
@@ -129,10 +123,9 @@ function App() {
     const next = buildTxValues(profile.txSchemas, txValuesRef.current)
     txValuesRef.current = next
     setTxValues(next)
-    if (!['pid', 'terminal', 'config'].includes(activeTab) && !profile.customTabs.some((tab) => tab.id === activeTab)) setActiveTab('config')
+    if (!['terminal', 'display', 'professional', 'packet-config', 'settings'].includes(activeTab)) setActiveTab('terminal')
   }, [activeTab, profile])
 
-  useEffect(() => { pausedRef.current = paused }, [paused])
   const updateProfile = (next: AppProfile) => {
     profileRef.current = next
     setProfile(next)
@@ -140,11 +133,11 @@ function App() {
 
   const connect = async () => {
     setConnecting(true)
-    setStatus('等待选择DAPLink虚拟串口…')
+    setStatus('等待选择 DAPLink 虚拟串口...')
     try {
       await transportRef.current!.connect(profile.serial)
       setConnected(true)
-      setStatus(`已连接 · ${profile.serial.baudRate} ${profile.serial.dataBits}N${profile.serial.stopBits}`)
+      setStatus(`已连接 · ${profile.serial.baudRate} ${profile.serial.dataBits}${profile.serial.parity === 'none' ? 'N' : profile.serial.parity[0].toUpperCase()}${profile.serial.stopBits}`)
     } catch (error) {
       setStatus(`连接失败：${(error as Error).message}`)
     } finally {
@@ -159,43 +152,62 @@ function App() {
     setStatus('已断开。')
   }
 
-  const updateTxValue = (messageId: number, fieldKey: string, value: FieldValue) => {
-    const next = { ...txValuesRef.current, [messageId]: { ...(txValuesRef.current[messageId] ?? {}), [fieldKey]: value } }
+  const updateTxValue = (messageUid: string, fieldKey: string, value: FieldValue) => {
+    const next = { ...txValuesRef.current, [messageUid]: { ...(txValuesRef.current[messageUid] ?? {}), [fieldKey]: value } }
     txValuesRef.current = next
     setTxValues(next)
   }
 
   const encodeNext = (schema: MessageSchema, values: Record<string, FieldValue>) => {
-    const sequence = sequenceRef.current.get(schema.id) ?? 0
-    sequenceRef.current.set(schema.id, (sequence + 1) & 0xffff)
+    const sequence = sequenceRef.current.get(schema.uid) ?? 0
+    sequenceRef.current.set(schema.uid, (sequence + 1) & 0xffff)
     return encodeFrame(schema, values, sequence)
   }
 
-  const structuredSend = (schema: MessageSchema, values: Record<string, FieldValue>, latest = false) => {
+  const sendNow = (schema: MessageSchema, values: Record<string, FieldValue>, latest = false) => {
     if (!connected) {
-      setStatus('串口未连接，本次值已更新但没有排队发送。')
+      setStatus('串口未连接，本次值已更新但未发送。')
       return
     }
     try {
       const bytes = encodeNext(schema, values)
-      if (latest) transportRef.current!.sendLatest(`message-${schema.id}`, bytes)
+      if (latest) transportRef.current!.sendLatest(`message-${schema.uid}`, bytes)
       else transportRef.current!.send(bytes)
     } catch (error) {
       setStatus(`打包失败：${(error as Error).message}`)
     }
   }
 
-  const customChange = (messageId: number, fieldKey: string, value: FieldValue) => {
-    updateTxValue(messageId, fieldKey, value)
-    const schema = profileRef.current.txSchemas.find((item) => item.id === messageId)
-    if (schema) structuredSend(schema, txValuesRef.current[messageId], true)
+  const scheduleLatestSend = (schema: MessageSchema, values: Record<string, FieldValue>) => {
+    latestPayloadsRef.current.set(schema.uid, { schema, values: { ...values } })
+    if (latestTimersRef.current.has(schema.uid)) return
+    const timer = window.setTimeout(() => {
+      latestTimersRef.current.delete(schema.uid)
+      const payload = latestPayloadsRef.current.get(schema.uid)
+      latestPayloadsRef.current.delete(schema.uid)
+      if (payload) sendNow(payload.schema, payload.values, true)
+    }, 50)
+    latestTimersRef.current.set(schema.uid, timer)
+  }
+
+  const structuredSend = (schema: MessageSchema, values: Record<string, FieldValue>, latest = false) => {
+    if (latest) scheduleLatestSend(schema, values)
+    else sendNow(schema, values)
+  }
+
+  const controlFieldChange = (messageUid: string, fieldKey: string, value: FieldValue, latest = false) => {
+    updateTxValue(messageUid, fieldKey, value)
+    const schema = profileRef.current.txSchemas.find((item) => item.uid === messageUid)
+    const values = { ...(txValuesRef.current[messageUid] ?? {}), [fieldKey]: value }
+    txValuesRef.current = { ...txValuesRef.current, [messageUid]: values }
+    if (schema) structuredSend(schema, values, latest)
   }
 
   const rawSend = (bytes: Uint8Array, text?: string) => {
     if (!connected) return setStatus('串口未连接，数据未发送。')
     try {
       transportRef.current!.send(bytes)
-      if (text) setStatus(`已提交${bytes.length}字节UTF-8文本。`)
+      if (text !== undefined) setStatus(`已提交 ${bytes.length} 字节文本。`)
     } catch (error) {
       setStatus((error as Error).message)
     }
@@ -210,10 +222,11 @@ function App() {
   }
 
   const tabs = [
-    { id: 'pid', label: 'PID调试', icon: Activity },
     { id: 'terminal', label: '协议终端', icon: TerminalSquare },
-    { id: 'config', label: '配置', icon: Settings },
-    ...profile.customTabs.map((tab) => ({ id: tab.id, label: tab.name, icon: SlidersHorizontal })),
+    { id: 'display', label: '展示终端', icon: BarChart3 },
+    { id: 'professional', label: '专业调试', icon: SlidersHorizontal },
+    { id: 'packet-config', label: '数据包配置', icon: Cable },
+    { id: 'settings', label: '设置', icon: Settings },
   ]
 
   return <div className="app-shell">
@@ -221,21 +234,20 @@ function App() {
       supported={Boolean(navigator.serial)}
       connected={connected}
       connecting={connecting}
-      settings={profile.serial}
       stats={stats}
-      status={navigator.serial ? status : '当前浏览器不支持Web Serial，请使用桌面Chrome或Edge。'}
-      onSettings={(serial) => updateProfile({ ...profile, serial })}
+      status={navigator.serial ? status : '当前浏览器不支持 Web Serial，请使用桌面 Chrome 或 Edge。'}
       onConnect={() => void connect()}
       onDisconnect={() => void disconnect()}
     />
-    <nav className="tab-bar" aria-label="功能Tab">
+    <nav className="tab-bar" aria-label="功能 Tab">
       {tabs.map((tab) => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><tab.icon size={17} />{tab.label}</button>)}
     </nav>
     <main className="workspace-main">
-      {activeTab === 'pid' && <PidTab profile={profile} frames={frames} onProfile={updateProfile} />}
-      {activeTab === 'terminal' && <ProtocolTab frames={frames} logs={logs} rxSchemas={profile.rxSchemas} txSchemas={profile.txSchemas} txValues={txValues} paused={paused} connected={connected} onPaused={setPaused} onClear={clearHistory} onTxValue={updateTxValue} onStructuredSend={(schema, values) => structuredSend(schema, values)} onRawSend={rawSend} />}
-      {activeTab === 'config' && <ConfigTab profile={profile} onProfile={updateProfile} />}
-      {profile.customTabs.map((tab) => activeTab === tab.id && <CustomTab key={tab.id} tab={tab} txSchemas={profile.txSchemas} txValues={txValues} connected={connected} onChange={customChange} />)}
+      {activeTab === 'terminal' && <ProtocolTab frames={frames} logs={logs} rxSchemas={profile.rxSchemas} txSchemas={profile.txSchemas} txValues={txValues} terminal={profile.terminal} paused={paused} connected={connected} onPaused={setPaused} onClear={clearHistory} onTxValue={updateTxValue} onStructuredSend={(schema, values) => structuredSend(schema, values)} onRawSend={rawSend} />}
+      {activeTab === 'display' && <DisplayTerminalTab profile={profile} frames={frames} onProfile={updateProfile} />}
+      {activeTab === 'professional' && <ProfessionalDebugTab profile={profile} txValues={txValues} connected={connected} onProfile={updateProfile} onFieldChange={controlFieldChange} />}
+      {activeTab === 'packet-config' && <PacketConfigTab profile={profile} onProfile={updateProfile} />}
+      {activeTab === 'settings' && <SettingsTab profile={profile} connected={connected} onProfile={updateProfile} />}
     </main>
   </div>
 }

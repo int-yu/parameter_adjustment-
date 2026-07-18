@@ -2,7 +2,7 @@ import type { AppProfile } from '../domain/types'
 import { DEFAULT_PROFILE } from '../domain/defaultProfile'
 import { cloneProfile, validateProfile } from '../protocol/schema'
 
-const STORAGE_KEY = 'daplink-parameter-profile.v1'
+const STORAGE_KEY = 'daplink-parameter-profile.v2'
 
 export const loadProfile = (): AppProfile => {
   try {
@@ -25,6 +25,6 @@ export const exportProfile = (profile: AppProfile): string => JSON.stringify(pro
 export const importProfile = (raw: string): AppProfile => {
   const profile = JSON.parse(raw) as AppProfile
   const errors = validateProfile(profile)
-  if (errors.length) throw new Error(errors.join('；'))
+  if (errors.length) throw new Error(errors.join('; '))
   return profile
 }

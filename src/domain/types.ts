@@ -11,6 +11,7 @@ export type FieldType =
   | 'fixed-string'
   | 'fixed-bytes'
 
+export type NumericFieldType = Extract<FieldType, 'u8' | 'i8' | 'u16' | 'i16' | 'u32' | 'i32' | 'f32' | 'f64'>
 export type FieldValue = boolean | number | string | Uint8Array
 export type PersistedFieldValue = boolean | number | string
 
@@ -27,6 +28,7 @@ export interface FieldSchema {
 export type MessageDirection = 'rx' | 'tx'
 
 export interface MessageSchema {
+  uid: string
   id: number
   name: string
   direction: MessageDirection
@@ -41,63 +43,72 @@ export interface SerialSettings {
   flowControl: 'none' | 'hardware'
 }
 
-export type FeedbackMode = 'direct' | 'counter-rate'
+export type TerminalEncoding = 'utf-8' | 'gbk' | 'ascii'
+export type LineEnding = 'none' | 'lf' | 'crlf'
 
-export interface PidMapping {
-  id: string
-  label: string
-  messageId: number
-  timeField: string
-  targetField: string
-  feedbackField: string
-  feedbackMode: FeedbackMode
-  outputField: string
-  encoderField?: string
-  angleWrap?: number
-  outputLimit?: number
+export interface TerminalSettings {
+  encoding: TerminalEncoding
+  lineEnding: LineEnding
 }
 
-export type ControlKind =
-  | 'bool-toggle'
-  | 'bool-hold'
-  | 'bool-pulse'
-  | 'text'
-  | 'number'
-  | 'slider'
-  | 'enum'
-
-export interface EnumOption {
-  label: string
-  value: number
+export interface HistorySettings {
+  maxFrames: number
+  maxLogs: number
 }
 
-export interface ControlDefinition {
+export interface ChartSettings {
+  timeWindowSeconds: number
+}
+
+export interface DisplaySeriesConfig {
   id: string
+  messageUid: string
+  fieldId: string
+  color: string
+  scale: number
+}
+
+export type ProfessionalMode = 'move' | 'angle'
+export type ProfessionalWidgetKind = 'button' | 'switch' | 'slider' | 'joystick' | 'numeric'
+
+export interface FieldBinding {
+  messageUid: string
+  fieldId: string
+}
+
+export interface JoystickBinding {
+  messageUid: string
+  xFieldId: string
+  yFieldId: string
+}
+
+export interface ProfessionalWidget {
+  id: string
+  kind: ProfessionalWidgetKind
   label: string
-  messageId: number
-  fieldKey: string
-  kind: ControlKind
+  x: number
+  y: number
+  width: number
+  height: number
+  angle: number
+  binding?: FieldBinding
+  joystickBinding?: JoystickBinding
   min?: number
   max?: number
   step?: number
-  pulseMs?: number
-  options?: EnumOption[]
-}
-
-export interface CustomTabDefinition {
-  id: string
-  name: string
-  controls: ControlDefinition[]
 }
 
 export interface AppProfile {
-  version: 1
+  version: 2
   name: string
   serial: SerialSettings
+  terminal: TerminalSettings
+  history: HistorySettings
+  chart: ChartSettings
   rxSchemas: MessageSchema[]
   txSchemas: MessageSchema[]
-  pidMappings: PidMapping[]
-  customTabs: CustomTabDefinition[]
+  displaySeries: DisplaySeriesConfig[]
+  professionalControls: ProfessionalWidget[]
 }
 
 export interface DecodedFrame {

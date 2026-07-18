@@ -12,13 +12,13 @@ const decoder = new TextDecoder('utf-8', { fatal: false })
 
 const requireNumber = (value: FieldValue | undefined, field: FieldSchema): number => {
   const number = typeof value === 'number' ? value : Number(value)
-  if (!Number.isFinite(number)) throw new Error(`${field.label}不是有效数字`)
+  if (!Number.isFinite(number)) throw new Error(`${field.label} is not a valid number`)
   return number
 }
 
 const parseHex = (value: string): Uint8Array => {
   const normalized = value.replace(/0x/gi, '').replace(/[^0-9a-f]/gi, '')
-  if (normalized.length % 2 !== 0) throw new Error('HEX字节必须成对')
+  if (normalized.length % 2 !== 0) throw new Error('HEX bytes must be paired')
   const bytes = new Uint8Array(normalized.length / 2)
   for (let index = 0; index < bytes.length; index += 1) {
     bytes[index] = Number.parseInt(normalized.slice(index * 2, index * 2 + 2), 16)
@@ -82,7 +82,7 @@ export const encodePayload = (
       }
       case 'fixed-bytes': {
         const bytes = value instanceof Uint8Array ? value : parseHex(String(value ?? ''))
-        if (bytes.length > fieldByteSize(field)) throw new Error(`${field.label}超过固定长度`)
+        if (bytes.length > fieldByteSize(field)) throw new Error(`${field.label} exceeds the fixed length`)
         payload.set(bytes, offset)
         break
       }
@@ -97,7 +97,7 @@ export const decodePayload = (
   payload: Uint8Array,
 ): Record<string, FieldValue> => {
   if (payload.length !== payloadByteSize(schema)) {
-    throw new Error(`Payload长度${payload.length}与Schema长度${payloadByteSize(schema)}不一致`)
+    throw new Error(`Payload length ${payload.length} does not match schema length ${payloadByteSize(schema)}`)
   }
   const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
   const values: Record<string, FieldValue> = {}
@@ -107,7 +107,7 @@ export const decodePayload = (
     switch (field.type) {
       case 'bool': {
         const raw = view.getUint8(offset)
-        if (raw !== 0 && raw !== 1) throw new Error(`${field.label}的bool值必须为0或1`)
+        if (raw !== 0 && raw !== 1) throw new Error(`${field.label} bool value must be 0 or 1`)
         values[field.key] = raw === 1
         break
       }
@@ -138,7 +138,7 @@ export const encodeFrame = (
   sequence: number,
 ): Uint8Array => {
   const payload = encodePayload(schema, values)
-  if (payload.length > MAX_PAYLOAD) throw new Error('Payload超过512字节')
+  if (payload.length > MAX_PAYLOAD) throw new Error('Payload exceeds 512 bytes')
   const frame = new Uint8Array(payload.length + 12)
   const view = new DataView(frame.buffer)
   frame.set(FRAME_HEAD, 0)

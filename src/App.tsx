@@ -70,7 +70,7 @@ function App() {
     onBytesRef.current = (bytes) => {
       statsRef.current.rxBytes += bytes.length
       queueLog({ time: Date.now(), direction: 'rx', bytes: bytes.slice(), status: 'raw' })
-      const result = parserRef.current.push(bytes, (messageId) => profileRef.current.rxSchemas.find((schema) => schema.id === messageId))
+      const result = parserRef.current.push(bytes, (messageId) => profileRef.current.rxSchemas.find((schema) => schema.id === messageId), profileRef.current.frameFormat)
       statsRef.current.invalidFrames += result.issues.filter((issue) => issue.kind !== 'noise').length
       for (const issue of result.issues) queueLog({ time: Date.now(), direction: 'rx', bytes: issue.raw, status: 'error', note: issue.message })
       for (const frame of result.frames) {
@@ -127,6 +127,7 @@ function App() {
   }, [activeTab, profile])
 
   const updateProfile = (next: AppProfile) => {
+    if (JSON.stringify(profileRef.current.frameFormat) !== JSON.stringify(next.frameFormat)) parserRef.current.reset()
     profileRef.current = next
     setProfile(next)
   }
@@ -161,7 +162,7 @@ function App() {
   const encodeNext = (schema: MessageSchema, values: Record<string, FieldValue>) => {
     const sequence = sequenceRef.current.get(schema.uid) ?? 0
     sequenceRef.current.set(schema.uid, (sequence + 1) & 0xffff)
-    return encodeFrame(schema, values, sequence)
+    return encodeFrame(schema, values, sequence, profileRef.current.frameFormat)
   }
 
   const sendNow = (schema: MessageSchema, values: Record<string, FieldValue>, latest = false) => {
@@ -243,7 +244,7 @@ function App() {
       {tabs.map((tab) => <button key={tab.id} className={activeTab === tab.id ? 'active' : ''} onClick={() => setActiveTab(tab.id)}><tab.icon size={17} />{tab.label}</button>)}
     </nav>
     <main className="workspace-main">
-      {activeTab === 'terminal' && <ProtocolTab frames={frames} logs={logs} rxSchemas={profile.rxSchemas} txSchemas={profile.txSchemas} txValues={txValues} terminal={profile.terminal} paused={paused} connected={connected} onPaused={setPaused} onClear={clearHistory} onTxValue={updateTxValue} onStructuredSend={(schema, values) => structuredSend(schema, values)} onRawSend={rawSend} />}
+      {activeTab === 'terminal' && <ProtocolTab frames={frames} logs={logs} rxSchemas={profile.rxSchemas} txSchemas={profile.txSchemas} txValues={txValues} terminal={profile.terminal} frameFormat={profile.frameFormat} paused={paused} connected={connected} onPaused={setPaused} onClear={clearHistory} onTxValue={updateTxValue} onStructuredSend={(schema, values) => structuredSend(schema, values)} onRawSend={rawSend} />}
       {activeTab === 'display' && <DisplayTerminalTab profile={profile} frames={frames} onProfile={updateProfile} />}
       {activeTab === 'professional' && <ProfessionalDebugTab profile={profile} txValues={txValues} connected={connected} onProfile={updateProfile} onFieldChange={controlFieldChange} />}
       {activeTab === 'packet-config' && <PacketConfigTab profile={profile} onProfile={updateProfile} />}

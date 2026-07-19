@@ -2,7 +2,7 @@
 import { Download, Eraser, Pause, Play, Send, TerminalSquare } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { DecodedFrame, FieldValue, MessageSchema, RawLogEntry, TerminalSettings } from '../domain/types'
+import type { DecodedFrame, FieldValue, FrameFormat, MessageSchema, RawLogEntry, TerminalSettings } from '../domain/types'
 import { bytesToHex, encodeFrame, hexToBytes } from '../protocol/codec'
 import { defaultValueForField } from '../protocol/schema'
 import { decodeTerminalText, encodeTerminalText } from '../utils/encoding'
@@ -14,6 +14,7 @@ interface Props {
   txSchemas: MessageSchema[]
   txValues: Record<string, Record<string, FieldValue>>
   terminal: TerminalSettings
+  frameFormat: FrameFormat
   paused: boolean
   connected: boolean
   onPaused: (paused: boolean) => void
@@ -66,7 +67,7 @@ export function ProtocolTab(props: Props) {
   const values = txSchema ? (props.txValues[txSchema.uid] ?? Object.fromEntries(txSchema.fields.map((field) => [field.key, defaultValueForField(field)]))) : {}
   let preview = ''
   try {
-    if (txSchema) preview = bytesToHex(encodeFrame(txSchema, values, 0))
+    if (txSchema) preview = bytesToHex(encodeFrame(txSchema, values, 0, props.frameFormat))
   } catch (error) {
     preview = (error as Error).message
   }

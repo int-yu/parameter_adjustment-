@@ -1,6 +1,8 @@
 import { ArrowDown, ArrowUp, Check, Copy, Plus, Trash2, Undo2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import type { AppProfile, FieldSchema, FieldType, MessageDirection, MessageSchema, ProfessionalWidget } from '../domain/types'
+import type { AppProfile, ByteOrder, CrcMode, FieldSchema, FieldType, FrameFormat, MessageDirection, MessageSchema, ProfessionalWidget } from '../domain/types'
+import { bytesToHex, hexToBytes } from '../protocol/codec'
+import { normalizeFrameFormat } from '../protocol/frameFormat'
 import { cloneProfile, payloadByteSize, validateProfile, validateMessageSchema } from '../protocol/schema'
 import { createId } from '../utils/id'
 
@@ -33,6 +35,14 @@ const newMessage = (direction: MessageDirection, existing: MessageSchema[]): Mes
   }
 }
 
+const safeHexToList = (value: string) => {
+  try {
+    return Array.from(hexToBytes(value))
+  } catch {
+    return null
+  }
+}
+
 const cleanBindings = (next: AppProfile): AppProfile => {
   const rxFieldIds = new Map(next.rxSchemas.map((schema) => [schema.uid, new Set(schema.fields.map((field) => field.id))]))
   const txFieldIds = new Map(next.txSchemas.map((schema) => [schema.uid, new Set(schema.fields.map((field) => field.id))]))
@@ -49,6 +59,67 @@ const cleanBindings = (next: AppProfile): AppProfile => {
     }
   })
   return { ...next, displaySeries, professionalControls }
+}
+
+function FrameFormatEditor({ format, onChange }: {
+  format: FrameFormat
+  onChange: (format: FrameFormat) => void
+}) {
+  const update = (patch: Partial<FrameFormat>) => onChange(normalizeFrameFormat({ ...format, ...patch }))
+  const frameOverhead = format.head.length + 6 + (format.crcMode === 'none' ? 0 : 2) + format.tail.length
+
+  return <section className="frame-format-section">
+    <div className="section-heading">
+      <div><h2>数据帧结构</h2><p>Payload 之前和之后的固定帧格式。字段顺序固定为版本、消息 ID、序号、Payload 长度。</p></div>
+    </div>
+    <div className="frame-format-grid">
+      <label>帧头 HEX
+        <input value={bytesToHex(format.head)} onChange={(event) => {
+          const bytes = safeHexToList(event.target.value)
+          if (bytes) update({ head: bytes })
+        }} placeholder="AA 55" />
+      </label>
+      <label>帧尾 HEX
+        <input value={bytesToHex(format.tail)} onChange={(event) => {
+          const bytes = safeHexToList(event.target.value)
+          if (bytes) update({ tail: bytes })
+        }} placeholder="0D 0A" />
+      </label>
+      <label>协议版本 0x
+        <input value={format.version.toString(16).toUpperCase().padStart(2, '0')} onChange={(event) => update({ version: Number.parseInt(event.target.value || '0', 16) || 0 })} />
+      </label>
+      <label>最大 Payload
+        <input type="number" min="0" max="4096" value={format.maxPayload} onChange={(event) => update({ maxPayload: Number(event.target.value) })} />
+      </label>
+      <label>序号字节序
+        <select value={format.sequenceEndian} onChange={(event) => update({ sequenceEndian: event.target.value as ByteOrder })}>
+          <option value="little">小端</option>
+          <option value="big">大端</option>
+        </select>
+      </label>
+      <label>长度字节序
+        <select value={format.lengthEndian} onChange={(event) => update({ lengthEndian: event.target.value as ByteOrder })}>
+          <option value="little">小端</option>
+          <option value="big">大端</option>
+        </select>
+      </label>
+      <label>CRC
+        <select value={format.crcMode} onChange={(event) => update({ crcMode: event.target.value as CrcMode })}>
+          <option value="crc16-ccitt-false">CRC16/CCITT-FALSE</option>
+          <option value="none">无 CRC</option>
+        </select>
+      </label>
+      <label>CRC 字节序
+        <select disabled={format.crcMode === 'none'} value={format.crcEndian} onChange={(event) => update({ crcEndian: event.target.value as ByteOrder })}>
+          <option value="little">小端</option>
+          <option value="big">大端</option>
+        </select>
+      </label>
+      <div className="frame-format-summary">
+        固定开销 <strong>{frameOverhead} B</strong>
+      </div>
+    </div>
+  </section>
 }
 
 function FieldRow({ field, index, count, onChange, onDelete, onMove }: {
@@ -87,8 +158,9 @@ function FieldRow({ field, index, count, onChange, onDelete, onMove }: {
   </div>
 }
 
-function MessageEditor({ schema, index, count, onChange, onDelete, onClone, onMove }: {
+function MessageEditor({ schema, maxPayload, index, count, onChange, onDelete, onClone, onMove }: {
   schema: MessageSchema
+  maxPayload: number
   index: number
   count: number
   onChange: (schema: MessageSchema) => void
@@ -96,7 +168,7 @@ function MessageEditor({ schema, index, count, onChange, onDelete, onClone, onMo
   onClone: () => void
   onMove: (delta: number) => void
 }) {
-  const errors = validateMessageSchema(schema)
+  const errors = validateMessageSchema(schema, maxPayload)
   let payloadSize = 0
   try { payloadSize = payloadByteSize(schema) } catch { payloadSize = 0 }
   const updateField = (fieldIndex: number, next: FieldSchema) => onChange({ ...schema, fields: schema.fields.map((field, current) => current === fieldIndex ? next : field) })
@@ -137,6 +209,7 @@ export function PacketConfigTab({ profile, onProfile }: Props) {
 
   const errors = useMemo(() => validateProfile(draft), [draft])
   const dirty = draft.name !== profile.name
+    || JSON.stringify(draft.frameFormat) !== JSON.stringify(profile.frameFormat)
     || JSON.stringify(draft.rxSchemas) !== JSON.stringify(profile.rxSchemas)
     || JSON.stringify(draft.txSchemas) !== JSON.stringify(profile.txSchemas)
 
@@ -154,10 +227,11 @@ export function PacketConfigTab({ profile, onProfile }: Props) {
 
   const applyDraft = () => {
     if (errors.length) return
-    const removesBinding = profile.displaySeries.length !== cleanBindings(draft).displaySeries.length
-      || JSON.stringify(profile.professionalControls) !== JSON.stringify(cleanBindings(draft).professionalControls)
+    const cleaned = cleanBindings(draft)
+    const removesBinding = profile.displaySeries.length !== cleaned.displaySeries.length
+      || JSON.stringify(profile.professionalControls) !== JSON.stringify(cleaned.professionalControls)
     if (removesBinding && !window.confirm('删除的数据包或变量会解除相关曲线和专业控件绑定，但保留控件位置。是否继续？')) return
-    onProfile(cleanBindings(draft))
+    onProfile(cleaned)
   }
 
   return <div className="tab-page packet-config-page">
@@ -169,6 +243,8 @@ export function PacketConfigTab({ profile, onProfile }: Props) {
       </div>
       {errors.length > 0 && <span className="validation-error">{errors[0]}</span>}
     </section>
+
+    <FrameFormatEditor format={draft.frameFormat} onChange={(frameFormat) => setDraft({ ...draft, frameFormat })} />
 
     <div className="packet-config-grid">
       {(['tx', 'rx'] as const).map((direction) => {
@@ -183,6 +259,7 @@ export function PacketConfigTab({ profile, onProfile }: Props) {
             {schemas.map((schema, index) => <MessageEditor
               key={schema.uid}
               schema={schema}
+              maxPayload={draft.frameFormat.maxPayload}
               index={index}
               count={schemas.length}
               onChange={(next) => updateSchemas(direction, schemas.map((item, current) => current === index ? next : item))}

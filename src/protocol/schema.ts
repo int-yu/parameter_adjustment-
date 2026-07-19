@@ -1,4 +1,5 @@
 import type { AppProfile, FieldSchema, FieldType, MessageSchema, NumericFieldType } from '../domain/types'
+import { DEFAULT_FRAME_FORMAT, normalizeFrameFormat, validateFrameFormat } from './frameFormat'
 
 const FIXED_SIZES: Partial<Record<FieldType, number>> = {
   bool: 1,
@@ -42,7 +43,7 @@ export const defaultValueForField = (field: FieldSchema) => {
 
 const KEY_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
-export const validateMessageSchema = (schema: MessageSchema): string[] => {
+export const validateMessageSchema = (schema: MessageSchema, maxPayload = DEFAULT_FRAME_FORMAT.maxPayload): string[] => {
   const errors: string[] = []
   const min = schema.direction === 'rx' ? 0x01 : 0x80
   const max = schema.direction === 'rx' ? 0x7f : 0xef
@@ -67,7 +68,7 @@ export const validateMessageSchema = (schema: MessageSchema): string[] => {
     }
   })
   try {
-    if (payloadByteSize(schema) > 512) errors.push('Payload cannot exceed 512 bytes')
+    if (payloadByteSize(schema) > maxPayload) errors.push(`Payload cannot exceed ${maxPayload} bytes`)
   } catch {
     // Field-specific error already included.
   }
@@ -82,11 +83,13 @@ export const validateProfile = (profile: AppProfile): string[] => {
   if (!Number.isInteger(profile.history.maxFrames) || profile.history.maxFrames < 100 || profile.history.maxFrames > 50000) errors.push('Frame history must be 100-50000')
   if (!Number.isInteger(profile.history.maxLogs) || profile.history.maxLogs < 100 || profile.history.maxLogs > 20000) errors.push('Log history must be 100-20000')
   if (!Number.isFinite(profile.chart.timeWindowSeconds) || profile.chart.timeWindowSeconds < 1 || profile.chart.timeWindowSeconds > 3600) errors.push('Chart window must be 1-3600 seconds')
+  const frameFormat = normalizeFrameFormat(profile.frameFormat)
+  errors.push(...validateFrameFormat(frameFormat))
 
   const identities = new Set<string>()
   const uids = new Set<string>()
   for (const schema of [...profile.rxSchemas, ...profile.txSchemas]) {
-    errors.push(...validateMessageSchema(schema))
+    errors.push(...validateMessageSchema(schema, frameFormat.maxPayload))
     const identity = `${schema.direction}:${schema.id}`
     if (identities.has(identity)) errors.push(`Message ID is duplicated: ${identity}`)
     identities.add(identity)

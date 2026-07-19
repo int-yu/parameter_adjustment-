@@ -1,11 +1,12 @@
-import type { FieldSchema, FieldValue, MessageSchema } from '../domain/types'
+import type { FieldSchema, FieldValue, FrameFormat, MessageSchema } from '../domain/types'
 import { crc16CcittFalse } from './crc'
+import { DEFAULT_FRAME_FORMAT, frameCrcSize, frameHeaderSize, frameLengthForPayload, writeUint16 } from './frameFormat'
 import { fieldByteSize, payloadByteSize } from './schema'
 
-export const FRAME_HEAD = new Uint8Array([0xaa, 0x55])
-export const FRAME_TAIL = new Uint8Array([0x0d, 0x0a])
-export const PROTOCOL_VERSION = 0x01
-export const MAX_PAYLOAD = 512
+export const FRAME_HEAD = new Uint8Array(DEFAULT_FRAME_FORMAT.head)
+export const FRAME_TAIL = new Uint8Array(DEFAULT_FRAME_FORMAT.tail)
+export const PROTOCOL_VERSION = DEFAULT_FRAME_FORMAT.version
+export const MAX_PAYLOAD = DEFAULT_FRAME_FORMAT.maxPayload
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder('utf-8', { fatal: false })
@@ -136,24 +137,32 @@ export const encodeFrame = (
   schema: MessageSchema,
   values: Record<string, FieldValue>,
   sequence: number,
+  frameFormat: FrameFormat = DEFAULT_FRAME_FORMAT,
 ): Uint8Array => {
   const payload = encodePayload(schema, values)
-  if (payload.length > MAX_PAYLOAD) throw new Error('Payload exceeds 512 bytes')
-  const frame = new Uint8Array(payload.length + 12)
+  if (payload.length > frameFormat.maxPayload) throw new Error(`Payload exceeds ${frameFormat.maxPayload} bytes`)
+  const frame = new Uint8Array(frameLengthForPayload(frameFormat, payload.length))
   const view = new DataView(frame.buffer)
-  frame.set(FRAME_HEAD, 0)
-  view.setUint8(2, PROTOCOL_VERSION)
-  view.setUint8(3, schema.id)
-  view.setUint16(4, sequence & 0xffff, true)
-  view.setUint16(6, payload.length, true)
-  frame.set(payload, 8)
-  const crc = crc16CcittFalse(frame.slice(2, 8 + payload.length))
-  view.setUint16(8 + payload.length, crc, true)
-  frame.set(FRAME_TAIL, 10 + payload.length)
+  const versionOffset = frameFormat.head.length
+  const payloadOffset = frameHeaderSize(frameFormat)
+  const crcOffset = payloadOffset + payload.length
+
+  frame.set(frameFormat.head, 0)
+  view.setUint8(versionOffset, frameFormat.version)
+  view.setUint8(versionOffset + 1, schema.id)
+  writeUint16(view, versionOffset + 2, sequence, frameFormat.sequenceEndian)
+  writeUint16(view, versionOffset + 4, payload.length, frameFormat.lengthEndian)
+  frame.set(payload, payloadOffset)
+
+  if (frameFormat.crcMode === 'crc16-ccitt-false') {
+    const crc = crc16CcittFalse(frame.slice(versionOffset, payloadOffset + payload.length))
+    writeUint16(view, crcOffset, crc, frameFormat.crcEndian)
+  }
+  frame.set(frameFormat.tail, crcOffset + frameCrcSize(frameFormat))
   return frame
 }
 
-export const bytesToHex = (bytes: Uint8Array): string =>
+export const bytesToHex = (bytes: Uint8Array | number[]): string =>
   Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0').toUpperCase()).join(' ')
 
 export const bytesToAscii = (bytes: Uint8Array): string =>

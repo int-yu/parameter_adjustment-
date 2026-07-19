@@ -11,6 +11,12 @@ describe('profile import', () => {
     expect(() => importProfile(JSON.stringify({ ...DEFAULT_PROFILE, version: 1 }))).toThrow(/version must be 2/i)
   })
 
+  it('adds the default frame format to older v2 profiles', () => {
+    const legacy = structuredClone(DEFAULT_PROFILE) as Partial<typeof DEFAULT_PROFILE>
+    delete legacy.frameFormat
+    expect(importProfile(JSON.stringify(legacy)).frameFormat.head).toEqual([0xaa, 0x55])
+  })
+
   it('rejects an invalid message ID and fixed length', () => {
     const invalid = structuredClone(DEFAULT_PROFILE)
     invalid.txSchemas = [{

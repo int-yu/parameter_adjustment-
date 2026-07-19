@@ -1,4 +1,5 @@
 import type { AppProfile } from './types'
+import { DEFAULT_FRAME_FORMAT } from '../protocol/frameFormat'
 
 export const DEFAULT_PROFILE: AppProfile = {
   version: 2,
@@ -21,6 +22,7 @@ export const DEFAULT_PROFILE: AppProfile = {
   chart: {
     timeWindowSeconds: 30,
   },
+  frameFormat: DEFAULT_FRAME_FORMAT,
   rxSchemas: [],
   txSchemas: [],
   displaySeries: [],

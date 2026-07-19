@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { MessageSchema } from '../domain/types'
+import type { FrameFormat, MessageSchema } from '../domain/types'
 import { encodeFrame } from './codec'
 import { FrameStreamParser } from './parser'
 
@@ -108,5 +108,25 @@ describe('FrameStreamParser', () => {
       cursor += size
     }
     expect(parsed.map((frame) => frame.sequence)).toEqual([10, 11, 12])
+  })
+
+  it('parses custom frame delimiters and big-endian sequence and length', () => {
+    const format: FrameFormat = {
+      head: [0xfe, 0xef, 0x10],
+      tail: [0xee],
+      version: 0x22,
+      maxPayload: 128,
+      sequenceEndian: 'big',
+      lengthEndian: 'big',
+      crcMode: 'none',
+      crcEndian: 'little',
+    }
+    const parser = new FrameStreamParser()
+    const frame = encodeFrame(telemetrySchema, values, 0x1234, format)
+    const result = parser.push(frame, resolver, format)
+    expect(result.frames).toHaveLength(1)
+    expect(result.frames[0].sequence).toBe(0x1234)
+    expect(result.frames[0].version).toBe(0x22)
+    expect(result.frames[0].values?.target).toBeCloseTo(300)
   })
 })

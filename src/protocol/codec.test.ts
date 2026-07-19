@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { MessageSchema } from '../domain/types'
+import type { FrameFormat, MessageSchema } from '../domain/types'
 import { decodePayload, encodeFrame, encodePayload } from './codec'
 import { payloadByteSize, validateMessageSchema } from './schema'
 
@@ -61,6 +61,28 @@ describe('payload codec', () => {
     const view = new DataView(frame.buffer)
     expect(view.getUint16(4, true)).toBe(0xffff)
     expect(view.getUint16(6, true)).toBe(payloadByteSize(schema))
+  })
+
+  it('encodes a custom frame head, tail, endian and crc mode', () => {
+    const format: FrameFormat = {
+      head: [0xfe, 0xef, 0x10],
+      tail: [0xee],
+      version: 0x22,
+      maxPayload: 128,
+      sequenceEndian: 'big',
+      lengthEndian: 'big',
+      crcMode: 'none',
+      crcEndian: 'little',
+    }
+    const frame = encodeFrame(schema, {
+      flag: false, u8: 1, i8: 2, u16: 3, i16: 4, u32: 5, i32: 6, f32: 7, f64: 8, text: '', bytes: '',
+    }, 0x1234, format)
+    expect(Array.from(frame.slice(0, 3))).toEqual([0xfe, 0xef, 0x10])
+    expect(frame[3]).toBe(0x22)
+    expect(frame[4]).toBe(0x81)
+    expect(Array.from(frame.slice(5, 7))).toEqual([0x12, 0x34])
+    expect(Array.from(frame.slice(7, 9))).toEqual([0x00, payloadByteSize(schema)])
+    expect(frame.at(-1)).toBe(0xee)
   })
 
   it('rejects invalid IDs, duplicate keys and oversized fields', () => {

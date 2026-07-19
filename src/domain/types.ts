@@ -60,6 +60,20 @@ export interface ChartSettings {
   timeWindowSeconds: number
 }
 
+export type ByteOrder = 'little' | 'big'
+export type CrcMode = 'crc16-ccitt-false' | 'none'
+
+export interface FrameFormat {
+  head: number[]
+  tail: number[]
+  version: number
+  maxPayload: number
+  sequenceEndian: ByteOrder
+  lengthEndian: ByteOrder
+  crcMode: CrcMode
+  crcEndian: ByteOrder
+}
+
 export interface DisplaySeriesConfig {
   id: string
   messageUid: string
@@ -105,6 +119,7 @@ export interface AppProfile {
   terminal: TerminalSettings
   history: HistorySettings
   chart: ChartSettings
+  frameFormat: FrameFormat
   rxSchemas: MessageSchema[]
   txSchemas: MessageSchema[]
   displaySeries: DisplaySeriesConfig[]

@@ -37,13 +37,9 @@ const defaultWidget = (kind: ProfessionalWidgetKind, index: number): Professiona
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-const controlSwitchKey = (control: ProfessionalWidget) =>
-  control.binding ? `${control.binding.messageUid}:${control.binding.fieldId}` : control.id
-
 export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, onFieldChange }: Props) {
   const [mode, setMode] = useState<ProfessionalMode>('move')
   const [selectedId, setSelectedId] = useState(profile.professionalControls[0]?.id ?? '')
-  const [switchValues, setSwitchValues] = useState<Record<string, boolean>>({})
   const dragRef = useRef<{ id: string; startX: number; startY: number; originX: number; originY: number } | null>(null)
   const selected = profile.professionalControls.find((control) => control.id === selectedId)
   const numericOptions = useMemo(() => profile.txSchemas.flatMap((message) => message.fields.filter(isNumericField).map((field) => ({ message, field }))), [profile.txSchemas])
@@ -76,7 +72,6 @@ export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, 
 
   const toggleSwitch = (control: ProfessionalWidget, currentValue: boolean) => {
     const nextValue = !currentValue
-    setSwitchValues((values) => ({ ...values, [controlSwitchKey(control)]: nextValue }))
     sendBoundValue(control, nextValue)
   }
 
@@ -126,7 +121,7 @@ export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, 
       return <button className="momentary-control" disabled={!field || !connected} onPointerDown={() => sendBoundValue(control, true)} onPointerUp={() => sendBoundValue(control, false)} onPointerLeave={() => sendBoundValue(control, false)}>{control.label}</button>
     }
     if (control.kind === 'switch') {
-      const checked = switchValues[controlSwitchKey(control)] ?? Boolean(currentValue)
+      const checked = Boolean(currentValue)
       return <button className={`toggle-control ${checked ? 'active' : ''}`} disabled={!field || !connected} onClick={() => toggleSwitch(control, checked)}>{checked ? 'ON' : 'OFF'}</button>
     }
     if (control.kind === 'slider') {

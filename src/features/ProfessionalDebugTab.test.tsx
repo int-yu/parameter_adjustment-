@@ -76,7 +76,7 @@ describe('ProfessionalDebugTab', () => {
       'tx-main': { run: false, x: 0, y: 0 },
     }
 
-    const { container } = render(
+    const { container, rerender } = render(
       <ProfessionalDebugTab
         profile={createProfile([switchControl, joystickControl])}
         txValues={fieldValues}
@@ -89,9 +89,55 @@ describe('ProfessionalDebugTab', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: 'OFF' }))
+    rerender(
+      <ProfessionalDebugTab
+        profile={createProfile([switchControl, joystickControl])}
+        txValues={fieldValues}
+        connected
+        onProfile={vi.fn()}
+        onFieldChange={(messageUid, fieldKey, value) => {
+          fieldValues[messageUid] = { ...fieldValues[messageUid], [fieldKey]: value }
+        }}
+      />,
+    )
     expect(screen.getByRole('button', { name: 'ON' })).toBeInTheDocument()
 
     fireEvent.pointerMove(container.querySelectorAll('.professional-widget')[1])
+    expect(screen.getByRole('button', { name: 'ON' })).toBeInTheDocument()
+  })
+
+  it('keeps a switch value after the professional tab is remounted', () => {
+    const profile = createProfile([switchControl])
+    const fieldValues: Record<string, Record<string, FieldValue>> = {
+      'tx-main': { run: false, x: 0, y: 0 },
+    }
+    const handleFieldChange = (messageUid: string, fieldKey: string, value: FieldValue) => {
+      fieldValues[messageUid] = { ...fieldValues[messageUid], [fieldKey]: value }
+    }
+
+    const { unmount } = render(
+      <ProfessionalDebugTab
+        profile={profile}
+        txValues={fieldValues}
+        connected
+        onProfile={vi.fn()}
+        onFieldChange={handleFieldChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'OFF' }))
+    unmount()
+
+    render(
+      <ProfessionalDebugTab
+        profile={profile}
+        txValues={fieldValues}
+        connected
+        onProfile={vi.fn()}
+        onFieldChange={handleFieldChange}
+      />,
+    )
+
     expect(screen.getByRole('button', { name: 'ON' })).toBeInTheDocument()
   })
 

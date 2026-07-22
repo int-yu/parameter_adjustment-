@@ -197,10 +197,12 @@ function App() {
   }
 
   const controlFieldChange = (messageUid: string, fieldKey: string, value: FieldValue, latest = false) => {
-    updateTxValue(messageUid, fieldKey, value)
+    const previousValues = txValuesRef.current[messageUid] ?? {}
+    const values = { ...previousValues, [fieldKey]: value }
+    const next = { ...txValuesRef.current, [messageUid]: values }
+    txValuesRef.current = next
+    setTxValues(next)
     const schema = profileRef.current.txSchemas.find((item) => item.uid === messageUid)
-    const values = { ...(txValuesRef.current[messageUid] ?? {}), [fieldKey]: value }
-    txValuesRef.current = { ...txValuesRef.current, [messageUid]: values }
     if (schema) structuredSend(schema, values, latest)
   }
 

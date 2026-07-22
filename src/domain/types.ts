@@ -110,6 +110,7 @@ export interface ProfessionalWidget {
   min?: number
   max?: number
   step?: number
+  locked?: boolean
 }
 
 export interface AppProfile {

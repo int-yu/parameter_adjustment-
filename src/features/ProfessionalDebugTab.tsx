@@ -1,4 +1,4 @@
-import { Gauge, MousePointer2, Plus, RotateCw, Trash2 } from 'lucide-react'
+import { Gauge, Lock, MousePointer2, Plus, RotateCw, Trash2, Unlock } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import type { AppProfile, FieldValue, ProfessionalMode, ProfessionalWidget, ProfessionalWidgetKind } from '../domain/types'
 import { findField, findMessage, valueForField } from '../domain/bindings'
@@ -37,9 +37,13 @@ const defaultWidget = (kind: ProfessionalWidgetKind, index: number): Professiona
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
+const controlSwitchKey = (control: ProfessionalWidget) =>
+  control.binding ? `${control.binding.messageUid}:${control.binding.fieldId}` : control.id
+
 export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, onFieldChange }: Props) {
   const [mode, setMode] = useState<ProfessionalMode>('move')
   const [selectedId, setSelectedId] = useState(profile.professionalControls[0]?.id ?? '')
+  const [switchValues, setSwitchValues] = useState<Record<string, boolean>>({})
   const dragRef = useRef<{ id: string; startX: number; startY: number; originX: number; originY: number } | null>(null)
   const selected = profile.professionalControls.find((control) => control.id === selectedId)
   const numericOptions = useMemo(() => profile.txSchemas.flatMap((message) => message.fields.filter(isNumericField).map((field) => ({ message, field }))), [profile.txSchemas])
@@ -70,6 +74,12 @@ export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, 
     onFieldChange(message.uid, field.key, value, latest)
   }
 
+  const toggleSwitch = (control: ProfessionalWidget, currentValue: boolean) => {
+    const nextValue = !currentValue
+    setSwitchValues((values) => ({ ...values, [controlSwitchKey(control)]: nextValue }))
+    sendBoundValue(control, nextValue)
+  }
+
   const sendJoystick = (control: ProfessionalWidget, x: number, y: number, latest = true) => {
     const message = findMessage(profile.txSchemas, control.joystickBinding?.messageUid)
     const xField = findField(message, control.joystickBinding?.xFieldId)
@@ -80,9 +90,10 @@ export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, 
   }
 
   const pointerDownFrame = (event: React.PointerEvent, control: ProfessionalWidget) => {
-    if ((event.target as HTMLElement).closest('button,input,select')) return
-    event.currentTarget.setPointerCapture(event.pointerId)
     setSelectedId(control.id)
+    if ((event.target as HTMLElement).closest('button,input,select,.joystick-pad')) return
+    if (control.kind === 'joystick' && control.locked) return
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     if (mode === 'move') {
       dragRef.current = { id: control.id, startX: event.clientX, startY: event.clientY, originX: control.x, originY: control.y }
     } else {
@@ -115,7 +126,8 @@ export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, 
       return <button className="momentary-control" disabled={!field || !connected} onPointerDown={() => sendBoundValue(control, true)} onPointerUp={() => sendBoundValue(control, false)} onPointerLeave={() => sendBoundValue(control, false)}>{control.label}</button>
     }
     if (control.kind === 'switch') {
-      return <button className={`toggle-control ${currentValue ? 'active' : ''}`} disabled={!field || !connected} onClick={() => sendBoundValue(control, !currentValue)}>{currentValue ? 'ON' : 'OFF'}</button>
+      const checked = switchValues[controlSwitchKey(control)] ?? Boolean(currentValue)
+      return <button className={`toggle-control ${checked ? 'active' : ''}`} disabled={!field || !connected} onClick={() => toggleSwitch(control, checked)}>{checked ? 'ON' : 'OFF'}</button>
     }
     if (control.kind === 'slider') {
       return <div className="slider-control professional-slider">
@@ -138,13 +150,26 @@ export function ProfessionalDebugTab({ profile, txValues, connected, onProfile, 
         {profile.professionalControls.length === 0 && <div className="empty-state">从右侧添加控件。</div>}
         {profile.professionalControls.map((control) => (
           <div
-            className={`professional-widget ${selectedId === control.id ? 'selected' : ''}`}
+            className={`professional-widget ${selectedId === control.id ? 'selected' : ''} ${control.locked ? 'locked' : ''}`}
             key={control.id}
             style={{ left: control.x, top: control.y, width: control.width, height: control.height, transform: `rotate(${control.angle}deg)` }}
             onPointerDown={(event) => pointerDownFrame(event, control)}
             onPointerMove={pointerMoveFrame}
             onPointerUp={() => { dragRef.current = null }}
           >
+            {control.kind === 'joystick' && <button
+              type="button"
+              className={`widget-lock-toggle ${control.locked ? 'active' : ''}`}
+              aria-label={control.locked ? '解锁摇杆位置' : '锁定摇杆位置'}
+              title={control.locked ? '解锁摇杆位置' : '锁定摇杆位置'}
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => {
+                event.stopPropagation()
+                updateControl(control.id, { locked: !control.locked })
+              }}
+            >
+              {control.locked ? <Lock size={13} /> : <Unlock size={13} />}
+            </button>}
             <div className="widget-title">{control.label}</div>
             <div className="widget-body">{renderWidget(control)}</div>
           </div>
@@ -183,6 +208,9 @@ function Joystick({ control, connected, onChange }: {
 }) {
   const [knob, setKnob] = useState({ x: 0, y: 0 })
   const drag = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!connected) return
     const rect = event.currentTarget.getBoundingClientRect()
     const nx = clamp((event.clientX - rect.left) / rect.width * 2 - 1, -1, 1)
     const ny = clamp((event.clientY - rect.top) / rect.height * 2 - 1, -1, 1)
@@ -191,11 +219,18 @@ function Joystick({ control, connected, onChange }: {
     const max = control.max ?? 100
     onChange(control, nx * Math.max(Math.abs(min), Math.abs(max)), -ny * Math.max(Math.abs(min), Math.abs(max)), true)
   }
-  const release = () => {
+  const pointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    drag(event)
+  }
+  const release = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    if (!connected) return
     setKnob({ x: 0, y: 0 })
     onChange(control, 0, 0, false)
   }
-  return <div className="joystick-pad" onPointerDown={drag} onPointerMove={(event) => event.buttons ? drag(event) : undefined} onPointerUp={release} onPointerLeave={release} aria-disabled={!connected}>
+  return <div className="joystick-pad" onPointerDown={pointerDown} onPointerMove={(event) => event.buttons ? drag(event) : undefined} onPointerUp={release} onPointerLeave={release} aria-disabled={!connected}>
     <span style={{ left: `${50 + knob.x * 38}%`, top: `${50 + knob.y * 38}%` }} />
   </div>
 }

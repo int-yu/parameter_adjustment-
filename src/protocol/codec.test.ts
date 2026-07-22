@@ -92,4 +92,17 @@ describe('payload codec', () => {
     ] }
     expect(validateMessageSchema(invalid).length).toBeGreaterThanOrEqual(4)
   })
+
+  it('rejects invalid periodic TX intervals', () => {
+    const invalid: MessageSchema = {
+      uid: 'periodic-bad',
+      id: 0x82,
+      name: 'PERIODIC_BAD',
+      direction: 'tx',
+      fields: [],
+      periodicSend: true,
+      periodMs: 10,
+    }
+    expect(validateMessageSchema(invalid)).toContain('PERIODIC_BAD period must be 20-60000 ms')
+  })
 })

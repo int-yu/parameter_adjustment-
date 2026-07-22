@@ -46,6 +46,7 @@ function App() {
   const transportRef = useRef<SerialTransport | null>(null)
   const latestTimersRef = useRef(new Map<string, number>())
   const latestPayloadsRef = useRef(new Map<string, { schema: MessageSchema; values: Record<string, FieldValue> }>())
+  const periodicTimersRef = useRef(new Map<string, number>())
 
   const flushPending = () => {
     flushTimerRef.current = null
@@ -102,6 +103,7 @@ function App() {
 
   useEffect(() => {
     const latestTimers = latestTimersRef.current
+    const periodicTimers = periodicTimersRef.current
     const transport = new SerialTransport({
       onBytes: (bytes) => onBytesRef.current(bytes),
       onTx: (bytes) => onTxRef.current(bytes),
@@ -112,6 +114,7 @@ function App() {
     return () => {
       if (flushTimerRef.current !== null) window.clearTimeout(flushTimerRef.current)
       for (const timer of latestTimers.values()) window.clearTimeout(timer)
+      for (const timer of periodicTimers.values()) window.clearInterval(timer)
       void transport.disconnect()
       transportRef.current = null
     }
@@ -195,6 +198,38 @@ function App() {
     if (latest) scheduleLatestSend(schema, values)
     else sendNow(schema, values)
   }
+
+  useEffect(() => {
+    const periodicTimers = periodicTimersRef.current
+    for (const timer of periodicTimers.values()) window.clearInterval(timer)
+    periodicTimers.clear()
+    if (!connected) return
+
+    for (const schema of profile.txSchemas) {
+      if (!schema.periodicSend) continue
+      const periodMs = schema.periodMs ?? 100
+      if (!Number.isInteger(periodMs) || periodMs < 20 || periodMs > 60000) continue
+      const timer = window.setInterval(() => {
+        const currentSchema = profileRef.current.txSchemas.find((item) => item.uid === schema.uid)
+        if (!currentSchema?.periodicSend || !transportRef.current?.connected) return
+        const values = txValuesRef.current[currentSchema.uid] ?? buildTxValues([currentSchema], txValuesRef.current)[currentSchema.uid]
+        try {
+          const sequence = sequenceRef.current.get(currentSchema.uid) ?? 0
+          sequenceRef.current.set(currentSchema.uid, (sequence + 1) & 0xffff)
+          const bytes = encodeFrame(currentSchema, values, sequence, profileRef.current.frameFormat)
+          transportRef.current.sendLatest(`message-${currentSchema.uid}`, bytes)
+        } catch (error) {
+          setStatus(`周期发送打包失败：${(error as Error).message}`)
+        }
+      }, periodMs)
+      periodicTimers.set(schema.uid, timer)
+    }
+
+    return () => {
+      for (const timer of periodicTimers.values()) window.clearInterval(timer)
+      periodicTimers.clear()
+    }
+  }, [connected, profile.txSchemas])
 
   const controlFieldChange = (messageUid: string, fieldKey: string, value: FieldValue, latest = false) => {
     const previousValues = txValuesRef.current[messageUid] ?? {}

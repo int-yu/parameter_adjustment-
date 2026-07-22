@@ -52,6 +52,11 @@ export const validateMessageSchema = (schema: MessageSchema, maxPayload = DEFAUL
     errors.push(`${schema.name || 'message'} ID must be 0x${min.toString(16)}-0x${max.toString(16)}`)
   }
   if (!schema.name.trim()) errors.push('Message name is required')
+  if (schema.direction === 'tx' && schema.periodicSend) {
+    if (!Number.isInteger(schema.periodMs) || (schema.periodMs ?? 0) < 20 || (schema.periodMs ?? 0) > 60000) {
+      errors.push(`${schema.name || 'message'} period must be 20-60000 ms`)
+    }
+  }
   const keys = new Set<string>()
   const fieldIds = new Set<string>()
   schema.fields.forEach((item, index) => {

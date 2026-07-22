@@ -138,6 +138,10 @@ button:disabled, input:disabled, select:disabled { opacity: .55; cursor: not-all
 .schema-ident label { display: flex; align-items: center; color: var(--muted); font-size: 11px; }
 .schema-ident label input { width: 68px; margin-left: 3px; font-family: Consolas, monospace; }
 .schema-ident strong { color: var(--muted); font-size: 12px; }
+.schema-periodic { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.schema-periodic label { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.schema-periodic input[type="checkbox"] { width: 16px; height: 16px; padding: 0; }
+.schema-periodic input[type="number"] { width: 88px; height: 30px; padding: 0 6px; }
 .direction { padding: 5px; border-radius: 4px; text-align: center; font-size: 10px; font-weight: 800; }
 .direction.rx { color: var(--blue); background: var(--blue-soft); }
 .direction.tx { color: var(--amber); background: #fff1dd; }

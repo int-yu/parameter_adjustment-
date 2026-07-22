@@ -33,6 +33,8 @@ export interface MessageSchema {
   name: string
   direction: MessageDirection
   fields: FieldSchema[]
+  periodicSend?: boolean
+  periodMs?: number
 }
 
 export interface SerialSettings {

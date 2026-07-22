@@ -32,6 +32,8 @@ const newMessage = (direction: MessageDirection, existing: MessageSchema[]): Mes
     name: direction === 'rx' ? 'RX_MESSAGE' : 'TX_MESSAGE',
     direction,
     fields: [],
+    periodicSend: direction === 'tx' ? false : undefined,
+    periodMs: direction === 'tx' ? 100 : undefined,
   }
 }
 
@@ -188,6 +190,11 @@ function MessageEditor({ schema, maxPayload, index, count, onChange, onDelete, o
         <label>ID 0x<input value={schema.id.toString(16).toUpperCase()} aria-label="消息 ID" onChange={(event) => onChange({ ...schema, id: Number.parseInt(event.target.value || '0', 16) || 0 })} /></label>
         <strong>{payloadSize} B</strong>
       </div>
+      {schema.direction === 'tx' && <div className="schema-periodic">
+        <label><input type="checkbox" checked={Boolean(schema.periodicSend)} onChange={(event) => onChange({ ...schema, periodicSend: event.target.checked, periodMs: schema.periodMs ?? 100 })} />周期发送</label>
+        <input type="number" min="20" max="60000" step="10" disabled={!schema.periodicSend} value={schema.periodMs ?? 100} onChange={(event) => onChange({ ...schema, periodMs: Number(event.target.value) })} />
+        <span>ms</span>
+      </div>}
       <div className="row-actions">
         <button className="icon-only" disabled={index === 0} title="上移消息" onClick={() => onMove(-1)}><ArrowUp size={16} /></button>
         <button className="icon-only" disabled={index === count - 1} title="下移消息" onClick={() => onMove(1)}><ArrowDown size={16} /></button>
